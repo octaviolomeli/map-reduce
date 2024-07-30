@@ -9,6 +9,6 @@
     <li>Stored intermediate output from workers' map tasks in JSON files to mimic local disk storage</li>
 </ul>
 
-## The relevant files are in the mr/ directory
+<h2>The relevant files are in the <a href="https://github.com/octaviolomeli/map-reduce/tree/main/mr">mr/ directory</a></h2>
 
 Inspired by the <a href="https://static.googleusercontent.com/media/research.google.com/en//archive/mapreduce-osdi04.pdf">MapReduce paper</a>
