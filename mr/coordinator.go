@@ -14,6 +14,8 @@ type Coordinator struct {
 	intermediateFiles map[int][]string      // Partition # to files
 	workerToStatus    map[int]int           // worker ID to status
 	mapToStatus       map[string]TaskStatus // filename to status
+	mapWasReExec      map[string]bool       // If this map task was re-executed
+	reduceWasReExec   map[int]bool          // If this reduce task was re-executed
 	reduceToStatus    map[int]TaskStatus    // Partition # to status
 	mapTaskNumber     int                   // For making map task ids
 	nReducer          int                   // # of partitions to make
@@ -56,6 +58,8 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	}
 
 	c.workerToStatus = make(map[int]int)
+	c.mapWasReExec = make(map[string]bool)
+	c.reduceWasReExec = make(map[int]bool)
 	c.intermediateFiles = make(map[int][]string)
 	c.StartTimer()
 	c.server()
@@ -118,7 +122,7 @@ func (c *Coordinator) RequestTaskHandler(args *ReqTaskArgs, reply *ReqTask) erro
 }
 
 // Track status for a map task, executed when a worker completes a map task
-func (c *Coordinator) TrackMapTaskHandler(args *MapTaskArgs) error {
+func (c *Coordinator) TrackMapTaskHandler(args *MapTaskArgs, reply *ReqTask) error {
 	c.mutexLock.Lock()
 	defer c.mutexLock.Unlock()
 	// Set task as completed
@@ -130,17 +134,68 @@ func (c *Coordinator) TrackMapTaskHandler(args *MapTaskArgs) error {
 		c.intermediateFiles[r] = append(c.intermediateFiles[r], args.IntermediateFile[r])
 	}
 
+	// See if there's a straggler task and if conditions are right, re-execute
+
+	// Find possible remaining tasks to re-execute for stragglers if no other task is idle
+	var possibleTask string
+	now := time.Now().Unix()
+	for mapTask, status := range c.mapToStatus {
+		if status.Status == IDLE_TASK {
+			return nil
+		} else if c.mapWasReExec[mapTask] == false && status.Status == INPROGRESS_TASK && now >= (status.StartTime+5) {
+			possibleTask = mapTask
+		}
+	}
+
+	// If no idle tasks, get a map task to re-execute for stragglers
+	if possibleTask != "" {
+		c.workerToStatus[args.WorkerId] = BUSY_WORKER
+		reply.Finished = false
+		reply.MapTask = &MapTask{
+			Filename:     possibleTask,
+			MapTaskId:    c.mapTaskNumber,
+			ReducerCount: c.nReducer,
+		}
+		c.mapTaskNumber += 1
+		c.mapWasReExec[possibleTask] = true
+	}
+
 	return nil
 }
 
 // Track status for a reduce task, executed when a worker completes a reduce task
-func (c *Coordinator) TrackReduceTaskHandler(args *ReduceTaskArgs) error {
+func (c *Coordinator) TrackReduceTaskHandler(args *ReduceTaskArgs, reply *ReqTask) error {
 	c.mutexLock.Lock()
 	defer c.mutexLock.Unlock()
 	// Set task as completed
 	c.reduceToStatus[args.ReduceId] = TaskStatus{StartTime: -1, Status: COMPLETED_TASK}
 	// Set worker as available for another task
 	c.workerToStatus[args.WorkerId] = AVAILABLE_WORKER
+
+	// See if there's a straggler task and if conditions are right, re-execute
+
+	// Find possible remaining tasks to re-execute for stragglers if no other task is idle
+	possibleTask := -1
+	now := time.Now().Unix()
+	for reduceTask, status := range c.reduceToStatus {
+		if status.Status == IDLE_TASK {
+			return nil
+		} else if c.reduceWasReExec[reduceTask] == false && status.Status == INPROGRESS_TASK && now >= (status.StartTime+5) {
+			possibleTask = reduceTask
+		}
+	}
+
+	// If no idle tasks, get a reduce task to re-execute for stragglers
+	if possibleTask != -1 {
+		c.workerToStatus[args.WorkerId] = BUSY_WORKER
+		reply.Finished = false
+		reply.ReduceTask = &ReduceTask{
+			ReduceId:         possibleTask,
+			IntermediateFile: c.intermediateFiles[possibleTask],
+		}
+		c.reduceWasReExec[possibleTask] = true
+	}
+
 	return nil
 }
 

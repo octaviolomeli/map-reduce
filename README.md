@@ -4,6 +4,7 @@
 <ul>
     <li>Utilized mutex locks to prevent data races across worker and coordinator processes. </li>
     <li>Added fault-tolerance & improved task completion speed by redistributing tasks from slow, assumed crashed, workers.</li>
+    <li>Improved performance by having backup executions of remaining in-progress tasks.</li>
     <li>Used RPC protocol to simulate communication between worker and coordinator machines.</li>
     <li>Stored intermediate output from workers' map tasks in JSON files to mimic local disk storage</li>
 </ul>

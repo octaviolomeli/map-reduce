@@ -112,8 +112,13 @@ func ExecuteMapTask(task *MapTask, mapf func(string, string) []KeyValue) {
 		IntermediateFile: intermediateFiles,
 		WorkerId:         os.Getpid(),
 	}
-	reply := EmptyReply{}
+	reply := ReqTask{}
 	call("Coordinator.TrackMapTaskHandler", &map_task_args, &reply)
+
+	// Reply might have a straggler task to complete
+	if reply.MapTask != nil {
+		ExecuteMapTask(reply.MapTask, mapf)
+	}
 }
 
 // Read intermediate file location and use reduce function on values aggregated by key
@@ -169,12 +174,17 @@ func ExecuteReduceTask(task *ReduceTask, reducef func(string, []string) string) 
 	os.Rename(tempFile.Name(), pattern)
 
 	// Message coordinator to track reduce task
-	reply := EmptyReply{}
+	reply := ReqTask{}
 	var reduce_task_args ReduceTaskArgs
 	reduce_task_args = ReduceTaskArgs{
 		WorkerId: os.Getpid(),
 		ReduceId: task.ReduceId}
 	call("Coordinator.TrackReduceTaskHandler", &reduce_task_args, &reply)
+
+	// Reply might have a straggler task to complete
+	if reply.ReduceTask != nil {
+		ExecuteReduceTask(reply.ReduceTask, reducef)
+	}
 }
 
 // Send an RPC request to the coordinator, wait for the response.
